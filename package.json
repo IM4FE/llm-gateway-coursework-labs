@@ -1,0 +1,47 @@
+{
+  "name": "llm-gateway-coursework",
+  "version": "0.1.0",
+  "description": "Unified LLM gateway with key rotation, provider fallback and request analytics",
+  "private": true,
+  "type": "module",
+  "main": "dist/index.js",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc -p tsconfig.build.json",
+    "start": "node dist/index.js",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "drizzle-kit migrate",
+    "db:seed": "tsx src/db/seed.ts",
+    "db:create-client": "tsx src/db/createClient.ts",
+    "db:studio": "drizzle-kit studio"
+  },
+  "keywords": [
+    "llm",
+    "gateway",
+    "fastify",
+    "typescript"
+  ],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "@types/node": "^26.6.4",
+    "drizzle-kit": "^0.31.11",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2",
+    "vitest": "^5.1.0"
+  },
+  "dependencies": {
+    "dotenv": "^18.0.5",
+    "drizzle-orm": "^0.45.4",
+    "fastify": "^5.12.5",
+    "pino": "^10.4.0",
+    "postgres": "^4.0.0",
+    "zod": "^4.6.5"
+  }
+}
