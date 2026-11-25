@@ -28,6 +28,17 @@ describe('Card', () => {
     expect(screen.getByText('Только контент')).toBeInTheDocument()
   })
 
+  it('renders a header with actions but without title and description', () => {
+    const { container } = render(
+      <Card actions={<button type="button">Действие</button>}>Контент</Card>,
+    )
+
+    expect(container.querySelector('.MuiCardHeader-root')).not.toBeNull()
+    expect(container.querySelector('.MuiCardHeader-title')).toBeNull()
+    expect(container.querySelector('.MuiCardHeader-subheader')).toBeNull()
+    expect(screen.getByRole('button', { name: 'Действие' })).toBeInTheDocument()
+  })
+
   it('supports the muted tone and custom class name', () => {
     const { container } = render(
       <Card className="custom" tone="muted">
