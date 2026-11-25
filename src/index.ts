@@ -1,0 +1,110 @@
+import { createProviderAdapter } from './adapters/createProviderAdapter.js';
+import { buildApp } from './app.js';
+import { createClientAuthenticator } from './auth/clientAuth.js';
+import { loadEnv } from './config/env.js';
+import type { KeyStateObserver } from './core/keyState.js';
+import { PoolRegistry } from './core/PoolRegistry.js';
+import { FixedWindowRateLimiter } from './core/RateLimiter.js';
+import { Router } from './core/Router.js';
+import { createApiKeyRepository } from './db/apiKeyRepository.js';
+import { createDatabase } from './db/client.js';
+import { createClientRepository } from './db/clientRepository.js';
+import { createKeyStateRepository } from './db/keyStateRepository.js';
+import { createRequestLogRepository } from './db/requestLogRepository.js';
+import { createLogger } from './logger.js';
+import { createDeploymentResolver } from './routes/deploymentResolver.js';
+import { createRouteRepository } from './routes/routeRepository.js';
+
+const env = loadEnv();
+const logger = createLogger(env);
+const database = createDatabase(env);
+
+const apiKeys = createApiKeyRepository(database.db, env.ENCRYPTION_KEY);
+const pools = new PoolRegistry((providerId) =>
+  apiKeys.createPool(providerId, {
+    failureThreshold: env.KEY_FAILURE_THRESHOLD,
+    failureCooldownMs: env.KEY_FAILURE_COOLDOWN_MS,
+  }),
+);
+const routes = createRouteRepository(database.db);
+const clients = createClientRepository(database.db);
+const authenticateClient = createClientAuthenticator(clients);
+const rateLimiter = new FixedWindowRateLimiter();
+const requestLogs = createRequestLogRepository(database.db);
+const keyStates = createKeyStateRepository(database.db);
+
+/**
+ * Состояние ключей сохраняется best-effort: ошибка БД не должна
+ * ломать уже полученный ответ провайдера. В отличие от журнала
+ * запросов, здесь запись не ждётся — это горячий путь Router'а.
+ */
+const onKeyState: KeyStateObserver = (event) => {
+  void keyStates.record(event).catch((error: unknown) => {
+    logger.error(
+      { err: error, keyId: event.keyId, type: event.type },
+      'failed to persist key state',
+    );
+  });
+};
+
+const router = new Router(
+  createDeploymentResolver({
+    routes,
+    pools,
+    createAdapter: (row) =>
+      createProviderAdapter(row.providerName, row.providerType),
+    headersFor: (row) => {
+      if (row.providerName !== 'OpenRouter') {
+        return undefined;
+      }
+
+      const headers: Record<string, string> = {};
+
+      if (env.OPENROUTER_REFERER !== undefined) {
+        headers['HTTP-Referer'] = env.OPENROUTER_REFERER;
+      }
+      if (env.OPENROUTER_TITLE !== undefined) {
+        headers['X-Title'] = env.OPENROUTER_TITLE;
+      }
+
+      return Object.keys(headers).length > 0 ? headers : undefined;
+    },
+  }),
+  { onKeyState },
+);
+
+const app = buildApp(env, {
+  router,
+  authenticateClient,
+  rateLimiter,
+  requestLogs,
+  logger,
+});
+
+const shutdown = async (signal: NodeJS.Signals): Promise<void> => {
+  app.log.info({ signal }, 'shutting down');
+
+  try {
+    await app.close();
+    await database.close();
+    process.exit(0);
+  } catch (error) {
+    app.log.error(error, 'failed to shut down gracefully');
+    process.exit(1);
+  }
+};
+
+process.once('SIGINT', () => {
+  void shutdown('SIGINT');
+});
+
+process.once('SIGTERM', () => {
+  void shutdown('SIGTERM');
+});
+
+try {
+  await app.listen({ host: env.HOST, port: env.PORT });
+} catch (error) {
+  app.log.error(error, 'failed to start the server');
+  process.exit(1);
+}
